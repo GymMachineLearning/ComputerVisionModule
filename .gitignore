@@ -1,0 +1,6 @@
+checkpoint
+demo/video
+demo/output
+demo/lib/checkpoint
+figure/
+*/__pycache__/
