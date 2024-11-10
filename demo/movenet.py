@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import glob
 import tensorflow as tf
-
+import json  
 
 import os 
 import sys
@@ -319,6 +319,54 @@ KEYPOINT_EDGE_INDS_TO_COLOR = {
     (14, 16): 'c'
 }
 
+
+# Mapa indeksów dla konwersji
+conversion_map = [
+    'nose',           # Nos
+  #  'neck',           # Szyja (średnia z `left_shoulder` i `right_shoulder`)
+    'right_shoulder', # Prawe ramię
+    'right_elbow',    # Prawy łokieć
+    'right_wrist',    # Prawy nadgarstek
+    'left_shoulder',  # Lewe ramię
+    'left_elbow',     # Lewy łokieć
+    'left_wrist',     # Lewy nadgarstek
+    'right_hip',      # Prawe biodro
+    'right_knee',     # Prawe kolano
+    'right_ankle',    # Prawa kostka
+    'left_hip',       # Lewe biodro
+    'left_knee',      # Lewe kolano
+    'left_ankle',     # Lewa kostka
+    'right_eye',      # Prawe oko
+    'left_eye',       # Lewe oko
+    'right_ear',      # Prawe ucho
+    'left_ear'        # Lewe ucho
+]
+
+
+
+def convert_to_coco(keypoints, scores):
+    # Tworzymy puste tablice na punkty i wyniki w nowej kolejności
+    coco_keypoints = np.zeros((17, 2))
+    coco_scores = np.zeros((17, 1))
+    
+    # Przypisujemy każdy punkt kluczowy oraz score do nowej tablicy na podstawie mapy indeksów
+    for i, key in enumerate(conversion_map):
+        # if key == 'neck':
+        #     # Obliczamy pozycję szyi jako średnią z lewego i prawego ramienia
+        #     coco_keypoints[i] = (keypoints[KEYPOINT_DICT['left_shoulder']] + 
+        #                          keypoints[KEYPOINT_DICT['right_shoulder']]) / 2
+            
+        #     # Obliczamy score dla szyi jako średnią z lewej i prawej strony
+        #     coco_scores[i] = (scores[KEYPOINT_DICT['left_shoulder']] + 
+        #                       scores[KEYPOINT_DICT['right_shoulder']]) / 2
+        # else:
+            # Przypisujemy odpowiednie punkty kluczowe i ich scores
+            coco_keypoints[i] = keypoints[KEYPOINT_DICT[key]]
+            coco_scores[i] = scores[KEYPOINT_DICT[key]]
+    
+    return coco_keypoints, coco_scores
+
+
 model = tf.saved_model.load("/home/kakold/Desktop/HoT-main")
 model_fn = model.signatures['serving_default']
 
@@ -343,6 +391,9 @@ def get_pose2D(video_path, output_dir):
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
     print('\nGenerating 2D pose...')
+    print('width', width)
+    print('height', height)
+    print('video_path', video_path)
     
     # Wczytanie modelu MovNet z TensorFlow
 
@@ -351,7 +402,9 @@ def get_pose2D(video_path, output_dir):
 
 
     keypoints_all = []
+    keypoints_all_coco = []
     scores_all = []
+    scores_all_coco = []
     frame_idx = 0
     crop_region = init_crop_region(height, width)
 
@@ -382,20 +435,53 @@ def get_pose2D(video_path, output_dir):
         keypoints_pixels = keypoints * [height, width]  # Skalowanie współrzędnych (y, x)
         keypoints_pixels = keypoints_pixels[:,:,:,:2][:,:,:, [1, 0]]
         #print("keypoints shape", keypoints.shape)
-        keypoints_all.append(keypoints_pixels)  # Zapisywanie pozy w tablicy
-        scores_all.append(scores)  # Zapisywanie pozy w tablicy
 
+        keypoints_pixels_coco, scores_coco = convert_to_coco(keypoints_pixels[0,0,:,:], scores[0,0,:])
+        keypoints_pixels_coco = keypoints_pixels_coco.reshape(1, 1, 17, 2)
+        scores_coco = scores_coco.reshape(1, 1, 17)
+
+
+
+        keypoints_all.append(keypoints_pixels)  
+        keypoints_all_coco.append(keypoints_pixels_coco)  
+
+        scores_all.append(scores)  # Zapisywanie pozy w tablicy
+        scores_all_coco.append(scores_coco)
         frame_idx += 1
 
     keypoints_all = np.concatenate(keypoints_all, axis=1)
+
+    keypoints_all_coco = np.concatenate(keypoints_all_coco, axis=1)
+
     scores_all = np.concatenate(scores_all, axis=1)
+    scores_all_coco = np.concatenate(scores_all_coco, axis=1)
     print("keypoints_all", keypoints_all)
     print("keypoints_all.shape",keypoints_all.shape)
-    print("scores_all.shape",keypoints_all.shape)
+    print("scores_all.shape",scores_all.shape)
     keypoints, scores, valid_frames = h36m_coco_format(keypoints_all, scores_all)
 
-    np.savez_compressed(output_dir + 'input_keypoints_2d.npz', reconstruction=keypoints)
 
+    print("keypoints.shape",keypoints.shape)
+
+    np.savez_compressed(output_dir + 'input_keypoints_2d.npz', reconstruction=keypoints)
+ # Prepare the JSON output structure
+    json_output = {
+        "keypoints": []
+    }
+
+    for frame_idx in range(keypoints_all.shape[1]):  # Iterate through all frames
+        formatted_keypoints = []
+
+        # Assuming there is always one person, so we use index 0
+        for kp, score in zip(keypoints_all[0, frame_idx], scores_all[0, frame_idx]):
+            formatted_keypoints.append([float(kp[0]), float(kp[1]), float(score)])  # Add (x, y, score)
+
+        json_output["keypoints"].append(formatted_keypoints)  # Append the formatted keypoints directly
+
+    # Save data to JSON file
+    with open(os.path.join(output_dir, 'keypoints.json'), 'w') as json_file:
+        json.dump(json_output, json_file, indent=4)
+    
     print('Generating 2D pose successfully!')
 
 # Funkcja do uzyskania pozy 3D
@@ -605,7 +691,7 @@ if __name__ == "__main__":
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
-    video_path = './demo/video/' + args.video
+    video_path = args.video
     video_name = video_path.split('/')[-1].split('.')[0]
     output_dir = './demo/output/' + video_name + '/'
 
