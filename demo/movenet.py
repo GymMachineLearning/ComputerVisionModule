@@ -461,8 +461,12 @@ def get_pose2D(video_path, output_dir):
     keypoints, scores, valid_frames = h36m_coco_format(keypoints_all, scores_all)
 
 
-    print("keypoints.shape",keypoints.shape)
-
+    # print("keypoints.shape",keypoints.shape)
+    # print("keypoints[]:", keypoints[0,0,0,:])
+    # keypoints = np.load('./example_dead.npz', allow_pickle=True)['reconstruction']
+    # keypoints = np.expand_dims(keypoints, axis=0)
+    # print("keypoints.shape",keypoints.shape)
+    # print("keypoints[]:", keypoints[0,0,0,:])
     np.savez_compressed(output_dir + 'input_keypoints_2d.npz', reconstruction=keypoints)
  # Prepare the JSON output structure
     json_output = {
@@ -637,11 +641,11 @@ def get_pose3D(video_path, output_dir, fix_z):
         image_2d = plt.imread(image_2d_dir[i])
         image_3d = plt.imread(image_3d_dir[i])
 
-        ## crop
-        edge = (image_2d.shape[1] - image_2d.shape[0]) // 2 - 1
+        # ## crop
+        # edge = (image_2d.shape[1] - image_2d.shape[0]) // 2 - 1
         # image_2d = image_2d[:, edge:image_2d.shape[1] - edge]
-        edge_1 = 10
-        image_2d = image_2d[edge_1:image_2d.shape[0] - edge_1, edge + edge_1:image_2d.shape[1] - edge - edge_1]
+        # edge_1 = 10
+        # image_2d = image_2d[edge_1:image_2d.shape[0] - edge_1, edge + edge_1:image_2d.shape[1] - edge - edge_1]
 
         edge = 130
         image_3d = image_3d[edge:image_3d.shape[0] - edge, edge:image_3d.shape[1] - edge]

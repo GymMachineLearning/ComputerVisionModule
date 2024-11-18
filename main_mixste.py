@@ -18,21 +18,92 @@ import common.loss as eval_loss
 from common.arguments import parse_args
 from common.load_data_hm36 import Fusion
 from common.h36m_dataset import Human36mDataset
-
+import json
 args = parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
 exec('from model.' + args.model + ' import Model')
 
+
+
 def train(dataloader, model, optimizer, epoch):
     model.train()
     loss_all = {'loss': AccumLoss()}
 
-    for i, data in enumerate(tqdm(dataloader)):
-        batch_cam, gt_3D, input_2D, input_2D_GT, action, subject, cam_ind = data
-        input_2D, input_2D_GT, gt_3D, batch_cam = input_2D.cuda(), input_2D_GT.cuda(), gt_3D.cuda(), batch_cam.cuda()
 
+    # os.makedirs('./fit3d/', exist_ok=True)
+    # output_npz = './fit3d/' + 'fit3dtrain.npz'
+    # np.savez_compressed(output_npz, reconstruction=joints_3d_labels)
+
+    # output_npz = './fit3d/' + 'fit3dtest.npz'
+    # np.savez_compressed(output_npz, reconstruction=joints_3d_labels_test)
+
+    # output_npz = './fit3d/' + 'fit2dtrain.npz'
+    # np.savez_compressed(output_npz, reconstruction=joints_2d_input)
+
+    # output_npz = './fit3d/' + 'fit2dtest.npz'
+    # np.savez_compressed(output_npz, reconstruction=joints_2d_input_test)
+    # Ścieżki do plików
+    file_3d_path_train = './fit3dtrain.npz'
+    file_3d_path_test = './fit3dtest.npz'
+    file_2d_path_train = './fit2dtrain.npz'
+    file_2d_path_test = './fit2dtest.npz'
+
+    # Wczytywanie danych z plików `.npz`
+    data_3d_train = np.load(file_3d_path_train)
+    data_3d_test = np.load(file_3d_path_test)
+    data_2d_train = np.load(file_2d_path_train)
+    data_2d_test = np.load(file_2d_path_test)
+
+    # Dostęp do zapisanych danych
+    data_3d_train = data_3d_train['reconstruction']  # Dane 3D
+    data_3d_test = data_3d_test['reconstruction']  # Dane 3D
+    data_2d_train = data_2d_train['reconstruction']  # Dane 2D
+    data_2d_test = data_2d_test['reconstruction']  # Dane 2D
+
+    # Wczytanie danych z pliku JSON
+    with open("splits.json", "r") as f:
+        loaded_splits = json.load(f)
+
+    # Przywrócenie zakresów do obiektów range
+    def convert_list_to_ranges(data):
+        return [range(r[0], r[1]) if isinstance(r, list) else r for r in data]
+
+    split_id_train_loaded = convert_list_to_ranges(loaded_splits["train"])
+    split_id_test_loaded = convert_list_to_ranges(loaded_splits["test"])
+
+    train_data, test_data = data_2d_train[split_id_train_loaded], data_2d_test[split_id_test_loaded]  # (18232, 243, 17, 3)
+        
+    train_labels, test_labels = data_3d_train[split_id_train_loaded], data_3d_test[split_id_test_loaded]  # (18232, 243, 17, 3)
+
+
+
+    for i, data in enumerate(tqdm(dataloader)):
+        print("i: ",i)
+        # batch_cam, gt_3D, input_2D, input_2D_GT, action, subject, cam_ind = data
+        gt_3D = train_labels[i,:,:,:]
+        input_2D = train_data[i,:,:,:]
+
+                # Konwersja na tensor PyTorch
+        gt_3D = torch.tensor(gt_3D)
+
+        # Dodanie wymiaru na początku
+        gt_3D = gt_3D.unsqueeze(0)
+
+        input_2D = torch.tensor(input_2D)
+
+        # Dodanie wymiaru na początku
+        input_2D = input_2D.unsqueeze(0)
+        # , input_2D, input_2D_GT, action, subject, cam_ind = data
+        print("(input_2D.type): ",type(input_2D))
+        print("(input_2D.shape): ",(input_2D.shape))
+        print("(gt_3D.shape): ",(gt_3D.shape))
+        print("(input_2D): ",(input_2D))
+        print("(gt_3D): ",(gt_3D))
+        # input_2D, input_2D_GT, gt_3D, batch_cam = input_2D.cuda(), input_2D_GT.cuda(), gt_3D.cuda(), batch_cam.cuda()
+        input_2D, gt_3D = input_2D.cuda(), gt_3D.cuda()
+        
         output_3D = model(input_2D)
 
         out_target = gt_3D.clone()
@@ -53,6 +124,16 @@ def train(dataloader, model, optimizer, epoch):
         N = input_2D.shape[0]
         loss_all['loss'].update(loss.detach().cpu().numpy() * N, N)
 
+    save_path=f"model_checkpoint{loss_all['loss'].avg}.pth"
+    # Zapis modelu po każdej epoce
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss_all['loss'].avg
+    }, save_path)
+
+    print(f"Model zapisany do: {save_path}")
     return loss_all['loss'].avg
 
 
@@ -113,7 +194,8 @@ if __name__ == '__main__':
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=args.batch_size,
                             shuffle=False, num_workers=int(args.workers), pin_memory=True)
 
-    model = Model(args).cuda()
+    # model = Model(args).cuda()
+    model = Model(args)
 
     if args.previous_dir != '':
         Load_model(args, model)

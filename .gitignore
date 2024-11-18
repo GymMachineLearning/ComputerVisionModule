@@ -5,3 +5,4 @@ demo/lib/checkpoint
 figure/
 */__pycache__/
 dataset/
+*.npz
